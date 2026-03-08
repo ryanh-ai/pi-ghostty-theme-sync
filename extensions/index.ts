@@ -139,22 +139,24 @@ function generatePiTheme(colors: GhosttyColors, themeName: string): object {
 	const accentAlt = colors.palette[6] || "#56b6c2";
 
 	// Derive neutrals from bg/fg for consistent readability across themes
-	const muted = mixColors(fg, bg, 0.65);
-	const dim = mixColors(fg, bg, 0.45);
-	const borderMuted = mixColors(fg, bg, 0.25);
+	// Light themes need stronger fg weighting to avoid washed-out grays
+	const muted = isDark ? mixColors(fg, bg, 0.65) : mixColors(fg, bg, 0.75);
+	const dim = isDark ? mixColors(fg, bg, 0.45) : mixColors(fg, bg, 0.55);
+	const borderMuted = isDark ? mixColors(fg, bg, 0.25) : mixColors(fg, bg, 0.35);
 
 	// Keep bg/fg for export and derived backgrounds
 	const _fg = fg;
 	const _bg = bg;
 
-	// Derive backgrounds
-	const bgShift = isDark ? 12 : -12;
+	// Derive backgrounds — use stronger shifts for light themes where subtle
+	// tints wash out, and gentler shifts for dark themes.
+	const bgShift = isDark ? 12 : -24;
 	const selectedBg = adjustBrightness(bg, bgShift);
 	const userMsgBg = adjustBrightness(bg, Math.round(bgShift * 0.7));
-	const toolPendingBg = adjustBrightness(bg, Math.round(bgShift * 0.4));
-	const toolSuccessBg = mixColors(bg, success, 0.88);
-	const toolErrorBg = mixColors(bg, error, 0.88);
-	const customMsgBg = mixColors(bg, accent, 0.92);
+	const toolPendingBg = adjustBrightness(bg, Math.round(bgShift * 0.5));
+	const toolSuccessBg = isDark ? mixColors(bg, success, 0.88) : mixColors(bg, success, 0.78);
+	const toolErrorBg = isDark ? mixColors(bg, error, 0.88) : mixColors(bg, error, 0.78);
+	const customMsgBg = isDark ? mixColors(bg, accent, 0.92) : mixColors(bg, accent, 0.85);
 
 	return {
 		$schema: "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
