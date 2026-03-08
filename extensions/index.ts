@@ -17,7 +17,7 @@
 
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -28,6 +28,36 @@ interface GhosttyColors {
 	palette: Record<number, string>;
 }
 
+function isDarkMode(): boolean {
+	try {
+		const result = execSync("defaults read -g AppleInterfaceStyle", {
+			encoding: "utf-8",
+			timeout: 2000,
+			stdio: ["pipe", "pipe", "pipe"],
+		}).trim();
+		return result === "Dark";
+	} catch {
+		// Command fails when Light mode is active (key doesn't exist)
+		return false;
+	}
+}
+
+function loadGhosttyThemeFile(themeName: string): string | null {
+	const searchPaths = [
+		join(homedir(), ".config", "ghostty", "themes", themeName),
+		join(homedir(), "Library", "Application Support", "com.mitchellh.ghostty", "themes", themeName),
+		"/Applications/Ghostty.app/Contents/Resources/ghostty/themes/" + themeName,
+	];
+	for (const p of searchPaths) {
+		try {
+			if (existsSync(p)) {
+			return readFileSync(p, "utf-8");
+			}
+		} catch { /* continue */ }
+	}
+	return null;
+}
+
 function getGhosttyColors(): GhosttyColors | null {
 	try {
 		const output = execSync("ghostty +show-config", {
@@ -35,6 +65,25 @@ function getGhosttyColors(): GhosttyColors | null {
 			timeout: 5000,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
+
+		// Check for conditional theme: "light:X,dark:Y"
+		const themeMatch = output.match(/^theme\s*=\s*(.+)$/m);
+		if (themeMatch) {
+			const themeValue = themeMatch[1].trim();
+			const conditionalMatch = themeValue.match(/light:(.+?),\s*dark:(.+)/);
+			if (conditionalMatch) {
+				const dark = isDarkMode();
+				const activeThemeName = dark ? conditionalMatch[2].trim() : conditionalMatch[1].trim();
+				const themeContent = loadGhosttyThemeFile(activeThemeName);
+				if (themeContent) {
+					// Parse the theme file first, then overlay with non-theme config
+					const colors = parseGhosttyConfig(themeContent);
+					// The theme file has the correct bg/fg/palette; use those
+					return colors;
+				}
+			}
+		}
+
 		return parseGhosttyConfig(output);
 	} catch {
 		return null;
