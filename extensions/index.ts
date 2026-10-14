@@ -58,7 +58,7 @@ function loadGhosttyThemeFile(themeName: string): string | null {
 	return null;
 }
 
-function getGhosttyColors(): GhosttyColors | null {
+function getGhosttyColors(darkMode = isDarkMode()): GhosttyColors | null {
 	try {
 		const output = execSync("ghostty +show-config", {
 			encoding: "utf-8",
@@ -72,8 +72,7 @@ function getGhosttyColors(): GhosttyColors | null {
 			const themeValue = themeMatch[1].trim();
 			const conditionalMatch = themeValue.match(/light:(.+?),\s*dark:(.+)/);
 			if (conditionalMatch) {
-				const dark = isDarkMode();
-				const activeThemeName = dark ? conditionalMatch[2].trim() : conditionalMatch[1].trim();
+				const activeThemeName = darkMode ? conditionalMatch[2].trim() : conditionalMatch[1].trim();
 				const themeContent = loadGhosttyThemeFile(activeThemeName);
 				if (themeContent) {
 					// Parse the theme file first, then overlay with non-theme config
@@ -333,38 +332,73 @@ function cleanupOldGhosttyThemes(themesDir: string, keepFile: string): void {
 }
 
 export default function (pi: ExtensionAPI) {
+	let appearanceInterval: ReturnType<typeof setInterval> | null = null;
+
 	pi.on("session_start", async (_event, ctx) => {
-		const colors = getGhosttyColors();
-		if (!colors) {
-			return;
+		const applyTheme = (darkMode: boolean): boolean => {
+			const colors = getGhosttyColors(darkMode);
+			if (!colors) {
+				return false;
+			}
+
+			const themesDir = join(homedir(), ".pi", "agent", "themes");
+			if (!existsSync(themesDir)) {
+				mkdirSync(themesDir, { recursive: true });
+			}
+
+			const hash = computeThemeHash(colors);
+			const themeName = `ghostty-sync-${hash}`;
+			const themeFile = `${themeName}.json`;
+			const themePath = join(themesDir, themeFile);
+
+			// If we're already on the correct synced theme, do nothing.
+			// This avoids an extra full-screen repaint on startup.
+			if (ctx.ui.theme.name === themeName) {
+				return true;
+			}
+
+			const themeJson = generatePiTheme(colors, themeName);
+			writeFileSync(themePath, JSON.stringify(themeJson, null, 2));
+
+			// Remove old generated themes so the themes dir doesn't grow forever.
+			cleanupOldGhosttyThemes(themesDir, themeFile);
+
+			// Important: set by name, so pi loads from the file we just wrote.
+			const result = ctx.ui.setTheme(themeName);
+			if (!result.success) {
+				ctx.ui.notify(`Ghostty theme sync failed: ${result.error}`, "error");
+				return false;
+			}
+			return true;
+		};
+
+		let currentDarkMode: boolean | null = null;
+		const initialDarkMode = isDarkMode();
+		if (applyTheme(initialDarkMode)) {
+			currentDarkMode = initialDarkMode;
 		}
 
-		const themesDir = join(homedir(), ".pi", "agent", "themes");
-		if (!existsSync(themesDir)) {
-			mkdirSync(themesDir, { recursive: true });
+		// Ghostty and Herdr react to macOS appearance changes while they are
+		// running. Poll the same setting so Pi follows without a restart too.
+		// Only keep a timer in the interactive TUI; print/JSON invocations must
+		// remain short-lived.
+		if (ctx.mode === "tui" && process.platform === "darwin") {
+			appearanceInterval = setInterval(() => {
+				const nextDarkMode = isDarkMode();
+				if (nextDarkMode === currentDarkMode) {
+					return;
+				}
+				if (applyTheme(nextDarkMode)) {
+					currentDarkMode = nextDarkMode;
+				}
+			}, 2000);
 		}
+	});
 
-		const hash = computeThemeHash(colors);
-		const themeName = `ghostty-sync-${hash}`;
-		const themeFile = `${themeName}.json`;
-		const themePath = join(themesDir, themeFile);
-
-		// If we're already on the correct synced theme, do nothing.
-		// This avoids an extra full-screen repaint on startup.
-		if (ctx.ui.theme.name === themeName) {
-			return;
-		}
-
-		const themeJson = generatePiTheme(colors, themeName);
-		writeFileSync(themePath, JSON.stringify(themeJson, null, 2));
-
-		// Remove old generated themes so the themes dir doesn't grow forever.
-		cleanupOldGhosttyThemes(themesDir, themeFile);
-
-		// Important: set by name, so pi loads from the file we just wrote.
-		const result = ctx.ui.setTheme(themeName);
-		if (!result.success) {
-			ctx.ui.notify(`Ghostty theme sync failed: ${result.error}`, "error");
+	pi.on("session_shutdown", () => {
+		if (appearanceInterval) {
+			clearInterval(appearanceInterval);
+			appearanceInterval = null;
 		}
 	});
 }

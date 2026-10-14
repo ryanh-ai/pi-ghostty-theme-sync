@@ -4,7 +4,7 @@ Sync [pi](https://github.com/badlogic/pi-mono) theme with your active [Ghostty](
 
 ![demo](https://raw.githubusercontent.com/ogulcancelik/pi-ghostty-theme-sync/main/assets/demo.gif)
 
-On startup, the extension runs `ghostty +show-config`, generates a pi theme, and switches pi to it.
+On startup, the extension runs `ghostty +show-config`, generates a pi theme, and switches pi to it. On macOS, it also watches the system appearance and updates Pi within about two seconds when light or dark mode changes.
 
 ## install
 
@@ -25,6 +25,7 @@ pi -e npm:pi-ghostty-theme-sync
 - Writes a theme to: `~/.pi/agent/themes/ghostty-sync-<hash>.json`.
 - Removes older `ghostty-sync-*.json` files (keeps only the current one).
 - Sets pi theme to `ghostty-sync-<hash>`.
+- In interactive macOS sessions, polls system appearance every two seconds and regenerates the active theme when light/dark mode changes.
 
 ## mapping notes
 
