@@ -169,6 +169,55 @@ function mixColors(color1: string, color2: string, weight: number): string {
 	);
 }
 
+// Bump when generated colors change for the same Ghostty palette, so existing
+// sessions regenerate instead of keeping the previous theme file.
+const THEME_GENERATOR_VERSION = "contrast-v1";
+
+// WCAG contrast targets. Keep readable text above common terminal
+// minimum-contrast settings (e.g. Ghostty's `minimum-contrast = 4`), so the
+// terminal does not force text to pure black or white.
+const TEXT_CONTRAST = 5.5;
+const MUTED_CONTRAST = 4.5;
+const DIM_CONTRAST = 3.2;
+
+function relativeLuminance(hex: string): number {
+	const { r, g, b } = hexToRgb(hex);
+	const [lr, lg, lb] = [r, g, b].map((channel) => {
+		const c = channel / 255;
+		return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+	});
+	return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+}
+
+function contrastRatio(a: string, b: string): number {
+	const la = relativeLuminance(a);
+	const lb = relativeLuminance(b);
+	return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+/**
+ * Move a color toward black (light themes) or white (dark themes) only as far
+ * as needed to meet `target` contrast on every background it can appear on.
+ */
+function ensureContrast(color: string, backgrounds: string[], target: number, isDark: boolean): string {
+	const minContrast = (c: string) => Math.min(...backgrounds.map((bg) => contrastRatio(c, bg)));
+	if (minContrast(color) >= target) {
+		return color;
+	}
+	const anchor = isDark ? "#ffffff" : "#000000";
+	let lo = 0;
+	let hi = 1;
+	for (let i = 0; i < 20; i++) {
+		const mid = (lo + hi) / 2;
+		if (minContrast(mixColors(anchor, color, mid)) >= target) {
+			hi = mid;
+		} else {
+			lo = mid;
+		}
+	}
+	return mixColors(anchor, color, hi);
+}
+
 function generatePiTheme(colors: GhosttyColors, themeName: string): object {
 	const bg = colors.background;
 	const fg = colors.foreground;
@@ -186,12 +235,6 @@ function generatePiTheme(colors: GhosttyColors, themeName: string): object {
 	const accent = colors.palette[5] || "#c678dd";
 	const accentAlt = colors.palette[6] || "#56b6c2";
 
-	// Derive neutrals from bg/fg for consistent readability across themes
-	// Light themes need stronger fg weighting to avoid washed-out grays
-	const muted = isDark ? mixColors(fg, bg, 0.65) : mixColors(fg, bg, 0.75);
-	const dim = isDark ? mixColors(fg, bg, 0.45) : mixColors(fg, bg, 0.55);
-	const borderMuted = isDark ? mixColors(fg, bg, 0.25) : mixColors(fg, bg, 0.35);
-
 	// Keep bg/fg for export and derived backgrounds
 	const _fg = fg;
 	const _bg = bg;
@@ -205,6 +248,25 @@ function generatePiTheme(colors: GhosttyColors, themeName: string): object {
 	const toolSuccessBg = isDark ? mixColors(bg, success, 0.88) : mixColors(bg, success, 0.78);
 	const toolErrorBg = isDark ? mixColors(bg, error, 0.88) : mixColors(bg, error, 0.78);
 	const customMsgBg = isDark ? mixColors(bg, accent, 0.92) : mixColors(bg, accent, 0.85);
+	const textBackgrounds = [bg, selectedBg, userMsgBg, toolPendingBg, toolSuccessBg, toolErrorBg, customMsgBg];
+
+	// Derive neutrals from bg/fg, then enforce contrast against every Pi
+	// background. Text is explicit rather than terminal-default so terminals
+	// with minimum-contrast correction do not snap it to pure black/white.
+	const text = ensureContrast(fg, textBackgrounds, TEXT_CONTRAST, isDark);
+	const muted = ensureContrast(
+		isDark ? mixColors(fg, bg, 0.65) : mixColors(fg, bg, 0.75),
+		textBackgrounds,
+		MUTED_CONTRAST,
+		isDark,
+	);
+	const dim = ensureContrast(
+		isDark ? mixColors(fg, bg, 0.45) : mixColors(fg, bg, 0.55),
+		[bg, selectedBg, userMsgBg],
+		DIM_CONTRAST,
+		isDark,
+	);
+	const borderMuted = isDark ? mixColors(fg, bg, 0.25) : mixColors(fg, bg, 0.35);
 
 	return {
 		$schema: "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
@@ -212,6 +274,7 @@ function generatePiTheme(colors: GhosttyColors, themeName: string): object {
 		vars: {
 			bg: _bg,
 			fg: _fg,
+			text,
 			accent,
 			accentAlt,
 			link,
@@ -239,20 +302,20 @@ function generatePiTheme(colors: GhosttyColors, themeName: string): object {
 			warning: "warning",
 			muted: "muted",
 			dim: "dim",
-			text: "",
+			text: "text",
 			thinkingText: "muted",
 
 			// Backgrounds
 			selectedBg: "selectedBg",
 			userMessageBg: "userMsgBg",
-			userMessageText: "",
+			userMessageText: "text",
 			customMessageBg: "customMsgBg",
-			customMessageText: "",
+			customMessageText: "text",
 			customMessageLabel: "accent",
 			toolPendingBg: "toolPendingBg",
 			toolSuccessBg: "toolSuccessBg",
 			toolErrorBg: "toolErrorBg",
-			toolTitle: "",
+			toolTitle: "text",
 			toolOutput: "muted",
 
 			// Markdown
@@ -280,7 +343,7 @@ function generatePiTheme(colors: GhosttyColors, themeName: string): object {
 			syntaxString: "success",
 			syntaxNumber: "accent",
 			syntaxType: "accentAlt",
-			syntaxOperator: "fg",
+			syntaxOperator: "text",
 			syntaxPunctuation: "muted",
 
 			// Thinking levels
@@ -303,7 +366,7 @@ function generatePiTheme(colors: GhosttyColors, themeName: string): object {
 }
 
 function computeThemeHash(colors: GhosttyColors): string {
-	const parts: string[] = [];
+	const parts: string[] = [`generator=${THEME_GENERATOR_VERSION}`];
 	parts.push(`bg=${colors.background}`);
 	parts.push(`fg=${colors.foreground}`);
 	for (let i = 0; i <= 15; i++) {

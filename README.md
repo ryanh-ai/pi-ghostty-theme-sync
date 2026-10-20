@@ -40,6 +40,8 @@ Uses ANSI slot semantics:
 
 Neutrals (`muted`, `dim`, subtle borders) are derived from `background` + `foreground` instead of trusting `palette[0]`/`palette[8]`.
 
+Text colors are contrast-checked (WCAG) against every generated Pi background: body text targets 5.5:1, muted text 4.5:1, and dim text 3.2:1. Body text is emitted as an explicit color rather than the terminal default, so terminals with a minimum-contrast setting (for example Ghostty's `minimum-contrast = 4`) do not snap text in tinted tool boxes to pure black or white.
+
 ## requirements
 
 - Ghostty installed and `ghostty` available in `PATH`
